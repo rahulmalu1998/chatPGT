@@ -30,107 +30,6 @@ function Chat() {
     scrollToBottom();
   }, [messages]);
 
-  // Function to learn a new word and play a word scramble game
-  const handleLearnWordWithGame = async () => {
-    if (loading || learningWord) return;
-
-    setLearningWord(true);
-
-    try {
-      // Use the chat endpoint directly with a learning request
-      const message = "I want to learn a new word and practice it";
-      
-      // Add user message to chat
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        { text: message, sender: "user" },
-      ]);
-      
-      // Add empty AI message that will be updated
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        { text: "", sender: "ai" },
-      ]);
-      
-      // Create EventSource for streaming
-      const eventSource = new EventSource(
-        `http://localhost:8080/chat?prompt=${encodeURIComponent(message)}&sessionId=${encodeURIComponent(sessionId.substring(0, 36))}`
-      );
-      
-      let fullResponse = "";
-      
-      eventSource.onmessage = (event) => {
-        if (event.data === "[DONE]") {
-          eventSource.close();
-          setLearningWord(false);
-          return;
-        }
-        
-        try {
-          const data = JSON.parse(event.data);
-          
-          // Handle word game data
-          if (data.wordGame) {
-            setScrambleSentence(data.wordGame.scrambleSentence);
-            
-            // Mark the current message as a game
-            setMessages((prevMessages) => {
-              const newMessages = [...prevMessages];
-              newMessages[newMessages.length - 1].gameType = "scramble";
-              return newMessages;
-            });
-            
-            return;
-          }
-          
-          if (data.chunk) {
-            fullResponse += data.chunk;
-            
-            // Update the AI message with the accumulated text
-            setMessages((prevMessages) => {
-              const newMessages = [...prevMessages];
-              newMessages[newMessages.length - 1].text = fullResponse;
-              return newMessages;
-            });
-          }
-          
-          if (data.error) {
-            setMessages((prevMessages) => {
-              const newMessages = [...prevMessages];
-              newMessages[newMessages.length - 1].text = `Error: ${data.error}`;
-              return newMessages;
-            });
-            eventSource.close();
-            setLearningWord(false);
-          }
-        } catch (e) {
-          console.error("Error parsing SSE data:", e);
-        }
-      };
-      
-      eventSource.onerror = () => {
-        eventSource.close();
-        setLearningWord(false);
-        
-        // Only update with error if we haven't received any response yet
-        if (!fullResponse) {
-          setMessages((prevMessages) => {
-            const newMessages = [...prevMessages];
-            newMessages[newMessages.length - 1].text = "Connection error. Please try again.";
-            return newMessages;
-          });
-        }
-      };
-    } catch (error) {
-      console.error("Error:", error);
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        { text: "Sorry, something went wrong.", sender: "ai" },
-      ]);
-      setLearningWord(false);
-    }
-  };
-
   // Handle game completion
   const handleGameComplete = (success) => {
     if (success) {
@@ -283,14 +182,6 @@ function Chat() {
           disabled={loading || learningWord || !input.trim()}
         >
           Send
-        </button>
-        <button
-          type="button"
-          onClick={handleLearnWordWithGame}
-          disabled={loading || learningWord}
-          className="learn-word-btn"
-        >
-          Learn & Practice
         </button>
       </form>
     </div>

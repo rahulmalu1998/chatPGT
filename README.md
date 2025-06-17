@@ -2,6 +2,7 @@
 
 An interactive chat application that helps users learn new words with comprehension checks and word scramble games.
 
+![alt text](image.png)
 ## Features
 
 - Chat with an AI assistant
