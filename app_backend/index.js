@@ -3,6 +3,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const bodyParser = require("body-parser");
 const dotenv = require("dotenv");
 const cors = require("cors");
+const path = require("path");
 
 dotenv.config();
 
@@ -12,6 +13,10 @@ const port = process.env.PORT || 8080;
 app.use(cors());
 app.use(bodyParser.json({ limit: "1mb" }));
 app.use(bodyParser.urlencoded({ limit: "1mb", extended: true }));
+// Serve static files from public
+app.use(express.static(path.join(__dirname, "public")));
+// For React Router: serve index.html for any unknown route
+
 const genAI = new GoogleGenerativeAI(process.env.API_KEY);
 
 const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
@@ -97,10 +102,10 @@ const handleChat = async (req, res) => {
   if (!prompt) {
     return res.status(400).send({ error: "Prompt is required" });
   }
-
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+
   res.setHeader("Access-Control-Allow-Origin", "*");
 
   try {
@@ -108,13 +113,15 @@ const handleChat = async (req, res) => {
     if (isWordLearningRequest(prompt)) {
       // Generate word data with game
       const wordData = await generateWordLearningGame();
-      
+
       if (wordData && wordData.word) {
         // Store the word data in the session for later use
         sessionWordGames[sessionId] = wordData;
-        
+
         // Create a system prompt for Gemini to handle the word learning flow
-        const systemPrompt = `You are a language learning assistant. You're helping a user learn the word "${wordData.word}".
+        const systemPrompt = `You are a language learning assistant. You're helping a user learn the word "${
+          wordData.word
+        }".
         
 Word information:
 - Word: ${wordData.word}
@@ -145,32 +152,32 @@ Important: When you reach step 5, include the exact phrase "SHOW_WORD_SCRAMBLE" 
             {
               role: "model",
               parts: [{ text: systemPrompt }],
-            }
+            },
           ],
         });
-        
+
         // Store this specialized chat session
         chatSessions[sessionId] = chat;
-        
+
         // Send the user's prompt to the chat
         const result = await chat.sendMessageStream(prompt);
-        
+
         let fullResponse = "";
         for await (const chunk of result.stream) {
           const text = chunk.text();
           fullResponse += text;
           res.write(`data: ${JSON.stringify({ chunk: text })}\n\n`);
         }
-        
+
         // Check if we need to show the word scramble game
         if (fullResponse.includes("SHOW_WORD_SCRAMBLE")) {
           // Remove the marker from the response
           const cleanResponse = fullResponse.replace("SHOW_WORD_SCRAMBLE", "");
-          
+
           // Send the word game data
           res.write(`data: ${JSON.stringify({ wordGame: wordData })}\n\n`);
         }
-        
+
         res.write("data: [DONE]\n\n");
         res.end();
         return;
@@ -186,17 +193,21 @@ Important: When you reach step 5, include the exact phrase "SHOW_WORD_SCRAMBLE" 
 
     // Send message to the chat session with streaming
     const result = await chat.sendMessageStream(prompt);
-    
+
     let fullResponse = "";
     for await (const chunk of result.stream) {
       const text = chunk.text();
       fullResponse += text;
       res.write(`data: ${JSON.stringify({ chunk: text })}\n\n`);
-      
+
       // Check if this response contains our marker for showing the word game
       if (text.includes("SHOW_WORD_SCRAMBLE") && sessionWordGames[sessionId]) {
         // Send the word game data
-        res.write(`data: ${JSON.stringify({ wordGame: sessionWordGames[sessionId] })}\n\n`);
+        res.write(
+          `data: ${JSON.stringify({
+            wordGame: sessionWordGames[sessionId],
+          })}\n\n`
+        );
       }
     }
 
