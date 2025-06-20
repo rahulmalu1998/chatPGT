@@ -52,9 +52,9 @@ const isWordLearningRequest = (prompt) => {
 };
 
 // Function to generate a word learning game with comprehension check
-const generateWordLearningGame = async () => {
+const generateWordLearningGame = async (prompt) => {
   try {
-    const wordPrompt = `Generate a random advanced English word that would be good for vocabulary building. 
+    const wordPrompt = `Generate a random advanced English word that would be good for vocabulary building, to ${prompt}. 
     Then create a simple sentence (5-8 words) using this word that would be good for a word scramble game.
     Also create a simple multiple-choice comprehension question about the word to check understanding.
     Make sure the scramble sentence uses the word in a natural way.
@@ -112,7 +112,7 @@ const handleChat = async (req, res) => {
     // Check if this is a word learning request
     if (isWordLearningRequest(prompt)) {
       // Generate word data with game
-      const wordData = await generateWordLearningGame();
+      const wordData = await generateWordLearningGame(prompt);
 
       if (wordData && wordData.word) {
         // Store the word data in the session for later use

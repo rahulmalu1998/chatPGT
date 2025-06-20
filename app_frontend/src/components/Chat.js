@@ -66,7 +66,7 @@ function Chat() {
 
       // Create EventSource for streaming
       const eventSource = new EventSource(
-        `http://localhost:8080/chat?prompt=${encodeURIComponent(
+        `/chat?prompt=${encodeURIComponent(
           limitedPrompt
         )}&sessionId=${encodeURIComponent(sessionId.substring(0, 36))}`
       );
