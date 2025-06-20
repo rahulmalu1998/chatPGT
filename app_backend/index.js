@@ -27,28 +27,46 @@ const chatSessions = {};
 // Store word game data by session
 const sessionWordGames = {};
 
-// Function to check if a prompt is about learning words
-const isWordLearningRequest = (prompt) => {
-  const learningKeywords = [
-    "learn word",
-    "learn a word",
-    "teach me a word",
-    "new word",
-    "vocabulary",
-    "meaning of",
-    "definition of",
-    "what does",
-    "what is",
-    "define",
-    "synonym",
-    "antonym",
-    "pronunciation",
-    "dictionary",
-  ];
+// Function to check if a prompt is about learning words using AI
+const isWordLearningRequest = async (session, prompt) => {
+  try {
+    const classificationPrompt = `Analyze this user message and determine if it's a request to learn new words, vocabulary, or word meanings.
 
-  return learningKeywords.some((keyword) =>
-    prompt.toLowerCase().includes(keyword.toLowerCase())
-  );
+User message: "${prompt}"
+Chat Session: "${session}"
+
+Respond with only "YES" if the user is asking to:
+- Learn new words or vocabulary
+- Get word definitions or meanings
+- Understand what a word means
+- Practice vocabulary
+- Get help with word pronunciation
+- Learn synonyms or antonyms
+- Any other word/vocabulary learning request
+
+Respond with only "NO" for all other types of requests (general chat, other topics, etc.)
+
+Response:`;
+
+    const result = await model.generateContent(classificationPrompt);
+    const response = result.response.text().trim().toUpperCase();
+
+    return response === "YES";
+  } catch (error) {
+    console.error("Error in word learning classification:", error);
+    // Fallback to keyword-based detection if AI fails
+    const learningKeywords = [
+      "learn word",
+      "vocabulary",
+      "meaning",
+      "definition",
+      "what does",
+      "what is",
+    ];
+    return learningKeywords.some((keyword) =>
+      prompt.toLowerCase().includes(keyword.toLowerCase())
+    );
+  }
 };
 
 // Function to generate a word learning game with comprehension check
@@ -109,19 +127,28 @@ const handleChat = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
 
   try {
-    // Check if this is a word learning request
-    if (isWordLearningRequest(prompt)) {
-      // Generate word data with game
-      const wordData = await generateWordLearningGame(prompt);
+    // Create or get existing chat session
+    if (!chatSessions[sessionId]) {
+      chatSessions[sessionId] = model.startChat();
+    }
+    const chat = chatSessions[sessionId];
 
-      if (wordData && wordData.word) {
-        // Store the word data in the session for later use
-        sessionWordGames[sessionId] = wordData;
+    // Check if user is in word learning mode or wants to learn words
+    const isLearningRequest = await isWordLearningRequest(chat, prompt);
 
-        // Create a system prompt for Gemini to handle the word learning flow
-        const systemPrompt = `You are a language learning assistant. You're helping a user learn the word "${
-          wordData.word
-        }".
+    if (isLearningRequest || sessionWordGames[sessionId]) {
+      let wordData = sessionWordGames[sessionId];
+
+      // Generate new word data only if it's a new learning request
+      if (isLearningRequest) {
+        wordData = await generateWordLearningGame(prompt);
+        if (wordData && wordData.word) {
+          sessionWordGames[sessionId] = wordData;
+
+          // Create enhanced prompt with word learning context
+          const systemPrompt = `You are a language learning assistant. You're helping a user learn the word "${
+            wordData.word
+          }".
         
 Word information:
 - Word: ${wordData.word}
@@ -142,54 +169,26 @@ Follow these steps in order:
 
 Important: When you reach step 5, include the exact phrase "SHOW_WORD_SCRAMBLE" at the end of your response.`;
 
-        // Create a new chat session with the system prompt
-        const chat = model.startChat({
-          history: [
-            {
-              role: "user",
-              parts: [{ text: "I want to learn a new word" }],
-            },
-            {
-              role: "model",
-              parts: [{ text: systemPrompt }],
-            },
-          ],
-        });
+          // Send the enhanced prompt to the existing chat
+          const result = await chat.sendMessageStream(systemPrompt);
 
-        // Store this specialized chat session
-        chatSessions[sessionId] = chat;
-
-        // Send the user's prompt to the chat
-        const result = await chat.sendMessageStream(prompt);
-
-        let fullResponse = "";
-        for await (const chunk of result.stream) {
-          const text = chunk.text();
-          fullResponse += text;
-          res.write(`data: ${JSON.stringify({ chunk: text })}\n\n`);
+          let fullResponse = "";
+          for await (const chunk of result.stream) {
+            const text = chunk.text();
+            fullResponse += text;
+            res.write(`data: ${JSON.stringify({ chunk: text })}\n\n`);
+          }
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
         }
-
-        // Check if we need to show the word scramble game
-        if (fullResponse.includes("SHOW_WORD_SCRAMBLE")) {
-          // Remove the marker from the response
-          const cleanResponse = fullResponse.replace("SHOW_WORD_SCRAMBLE", "");
-
-          // Send the word game data
-          res.write(`data: ${JSON.stringify({ wordGame: wordData })}\n\n`);
-        }
-
-        res.write("data: [DONE]\n\n");
-        res.end();
-        return;
+      }
+    } else {
+      // Clear word learning session if user is not learning words
+      if (sessionWordGames[sessionId]) {
+        delete sessionWordGames[sessionId];
       }
     }
-
-    // Normal chat flow
-    // Create or get existing chat session
-    if (!chatSessions[sessionId]) {
-      chatSessions[sessionId] = model.startChat();
-    }
-    const chat = chatSessions[sessionId];
 
     // Send message to the chat session with streaming
     const result = await chat.sendMessageStream(prompt);
@@ -198,8 +197,11 @@ Important: When you reach step 5, include the exact phrase "SHOW_WORD_SCRAMBLE" 
     for await (const chunk of result.stream) {
       const text = chunk.text();
       fullResponse += text;
-      res.write(`data: ${JSON.stringify({ chunk: text })}\n\n`);
-
+      let cleanResponse = text;
+      if (cleanResponse.includes("SHOW_WORD_SCRAMBLE")) {
+        cleanResponse = cleanResponse.replace("SHOW_WORD_SCRAMBLE", "");
+      }
+      res.write(`data: ${JSON.stringify({ chunk: cleanResponse })}\n\n`);
       // Check if this response contains our marker for showing the word game
       if (text.includes("SHOW_WORD_SCRAMBLE") && sessionWordGames[sessionId]) {
         // Send the word game data
@@ -208,6 +210,7 @@ Important: When you reach step 5, include the exact phrase "SHOW_WORD_SCRAMBLE" 
             wordGame: sessionWordGames[sessionId],
           })}\n\n`
         );
+        delete sessionWordGames[sessionId];
       }
     }
 
